@@ -1,0 +1,26 @@
+{
+  "dependencies": {
+    "@mysten/sui": "^1.21.0",
+    "@types/jsonwebtoken": "^9.0.8",
+    "axios": "^1.7.9",
+    "csv-parser": "^3.1.0",
+    "csv-writer": "^1.6.0",
+    "dotenv": "^16.4.7",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  },
+  "name": "stir-shaken",
+  "version": "1.0.0",
+  "description": "This project provides utilities to generate and verify JSON Web Tokens (JWTs) for a STIR/SHAKEN-like implementation. The tools allow you to create ES256 key pairs, sign JWTs, and verify them using the corresponding public keys.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
