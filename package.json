@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@mysten/sui": "^1.21.0",
+    "@mysten/sui": "^1.45.0",
     "@types/jsonwebtoken": "^9.0.8",
     "axios": "^1.7.9",
     "csv-parser": "^3.1.0",

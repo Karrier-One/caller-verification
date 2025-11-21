@@ -34,18 +34,22 @@
  *
  * Environment Variables:
  *   - KNS_ID_MAP_TABLE_ID: The Sui object ID for the KNS ID Map Table (required).
- *   - SUI_NETWORK: The Sui network to target ("testnet" or "mainnet") (required).
+ *   - SUI_NETWORK: The Sui network to target ("testnet" or "mainnet") (optional, defaults to mainnet).
  *   - KNS_API_BASE_URL: The base URL for the KNS API to look up object IDs by phone number (required).
  *   - KNS_API_KEY: The API key for accessing the KNS API (required).
  *
  * Usage:
- *   ts-node ./verify-full-flow.ts <jwtFile>
+ *   ts-node ./verify-full-flow.ts <jwtFile> [--network <mainnet|testnet>]
  *
  * Arguments:
  *   <jwtFile>: Path to the file containing the signed JWT to be verified.
  *
- * Example:
+ * Options:
+ *   --network <mainnet|testnet>  Override network selection (priority: CLI arg > .env > mainnet)
+ *
+ * Examples:
  *   ts-node ./verify-full-flow.ts ./es256-signed.jwt
+ *   ts-node ./verify-full-flow.ts ./es256-signed.jwt --network testnet
  *
  * The script will log the following:
  *   - The decoded JWT header and payload.
@@ -64,12 +68,39 @@ import jwt from 'jsonwebtoken';
 
 dotenv.config(); // Load environment variables
 
-// The KNS ID Map Table object ID from the environment.
-const knsIdMapTableId = process.env.KNS_ID_MAP_TABLE_ID!;
+// Parse command line arguments for network (--network <mainnet|testnet>)
+const args = process.argv.slice(2);
+const networkIndex = args.indexOf('--network');
+const network = (networkIndex !== -1 && args[networkIndex + 1])
+  ? args[networkIndex + 1] as "mainnet" | "testnet"
+  : "mainnet";
+
+// Validate network value
+if (network !== 'mainnet' && network !== 'testnet') {
+  console.error('Error: --network must be either "mainnet" or "testnet"');
+  process.exit(1);
+}
+
+console.log(`🌐 Using network: ${network}`);
+
+// Helper to get network-specific environment variable
+const getEnvVar = (varName: string): string => {
+  const networkPrefix = network.toUpperCase();
+  const value = process.env[`${networkPrefix}_${varName}`];
+  if (!value) {
+    throw new Error(`Environment variable ${networkPrefix}_${varName} is not set`);
+  }
+  return value;
+};
+
+// Retrieve network-specific environment variables
+const knsIdMapTableId = getEnvVar('KNS_ID_MAP_TABLE_ID');
+const knsApiBaseUrl = getEnvVar('KNS_API_BASE_URL');
+const knsApiKey = getEnvVar('KNS_API_KEY');
 
 // Instantiate the GraphQL client using the proper Sui network endpoint.
 const gqlClient = new SuiGraphQLClient({
-	url: `https://sui-${process.env.SUI_NETWORK! as "testnet" | "mainnet"}.mystenlabs.com/graphql`,
+	url: `https://graphql.${network}.sui.io/graphql`,
 });
 
 interface PublicKeySuiObject {
@@ -102,11 +133,11 @@ function formatPEM(key: string): string {
 }
 
 /**
- * GraphQL query to fetch dynamic fields from the KNS ID Map Table owner.
+ * GraphQL query to fetch dynamic fields from the KNS ID Map Table address.
  */
 const chainIdentifierQuery = graphql(`
 query ($id: SuiAddress!) {
-  owner(address: $id) {
+  address(address: $id) {
     dynamicFields {      
       nodes {            
         name { json }
@@ -128,7 +159,7 @@ query ($id: SuiAddress!) {
 /**
  * Queries the KNS ID Map Table for a given name.
  *
- * This function sends a GraphQL query to fetch the dynamic fields of the KNS ID Map Table owner,
+ * This function sends a GraphQL query to fetch the dynamic fields of the KNS ID Map Table address,
  * then searches for a node with a name matching the provided value.
  *
  * @param name - The name to search for (typically an object ID).
@@ -139,7 +170,7 @@ async function knsIdMapTable(name: string): Promise<string[] | null> {
 		query: chainIdentifierQuery,
 		variables: { id: knsIdMapTableId },
 	});
-	const nodes = result.data?.owner?.dynamicFields?.nodes;
+	const nodes = result.data?.address?.dynamicFields?.nodes;
 	const match = nodes?.find((node: any) => node.name.json === name);
 
 	if (!match) {
@@ -158,7 +189,7 @@ async function knsIdMapTable(name: string): Promise<string[] | null> {
  * @returns A promise resolving to the Sui object details.
  */
 async function getSuiObject(objectId: string) {
-	const client = new SuiClient({ url: getFullnodeUrl(process.env.SUI_NETWORK! as "testnet" | "mainnet") });
+	const client = new SuiClient({ url: getFullnodeUrl(network) });
 	const objectOwner = await client.getObject({
 		id: objectId,
 		options: {
@@ -182,11 +213,11 @@ async function getSuiObject(objectId: string) {
 async function lookupPublicKey(phoneNumber: string): Promise<PublicKNSKey[]> {
 	// Perform API call to retrieve objectId for the phone number.
 	const response = await axios.post(
-		`${process.env.KNS_API_BASE_URL!}/kns/object-id-lookup`,
+		`${knsApiBaseUrl}/kns/object-id-lookup`,
 		{ phoneNumber },
 		{
 			headers: {
-				'x-api-key': `${process.env.KNS_API_KEY!}`,
+				'x-api-key': knsApiKey,
 				'Content-Type': 'application/json',
 			},
 		}
@@ -288,10 +319,18 @@ async function verifyJwt(jwtFile: string) {
  * It initiates the verification process by calling verifyJwt.
  */
 async function main() {
-	const jwtFile = process.argv[2];
+	// Read JWT file from command line arguments (filter out --network flag)
+	const jwtFile = args.find((arg, index) => {
+		// Skip if it's a flag
+		if (arg.startsWith('--')) return false;
+		// Skip if it's the value after --network flag
+		if (networkIndex !== -1 && index === networkIndex + 1) return false;
+		// This is the JWT file
+		return true;
+	});
 
 	if (!jwtFile) {
-		console.error('Usage: ts-node <script>.ts <jwtFile>');
+		console.error('Usage: ts-node ./verify-full-flow.ts <jwtFile> [--network <mainnet|testnet>]');
 		process.exit(1);
 	}
 

@@ -11,17 +11,21 @@
  *
  * Requirements:
  * - A .env file containing environment variables:
- *    - SUI_NETWORK: "testnet" or "mainnet"
+ *    - SUI_NETWORK: "testnet" or "mainnet" (optional, defaults to mainnet)
  *    - KNS_ID_MAP_TABLE_ID: The table ID for the KNS ID map.
  *
  * Usage:
- *   ts-node ./lookup-number-key.ts <phoneNumber>
+ *   ts-node ./lookup-number-key.ts <phoneNumber> [--network <mainnet|testnet>]
  *
  * Arguments:
  *   <phoneNumber> - A phone number in E.164 format (e.g., "+15551234567").
  *
+ * Options:
+ *   --network <mainnet|testnet>  Override network selection (priority: CLI arg > .env > mainnet)
+ *
  * Example:
- *   ts-node ./sui-lookup.ts "+15551234567"
+ *   ts-node ./lookup-number-key.ts "+15551234567"
+ *   ts-node ./lookup-number-key.ts "+15551234567" --network testnet
  */
 
 import { SuiGraphQLClient } from '@mysten/sui/graphql';
@@ -32,18 +36,45 @@ import dotenv from 'dotenv';
 
 dotenv.config(); // Load environment variables from .env file
 
-// Environment variable for the KNS ID Map Table ID (must be defined in .env)
-const knsIdMapTableId = process.env.KNS_ID_MAP_TABLE_ID!;
+// Parse command line arguments for network (--network <mainnet|testnet>)
+const args = process.argv.slice(2);
+const networkIndex = args.indexOf('--network');
+const network = (networkIndex !== -1 && args[networkIndex + 1])
+  ? args[networkIndex + 1] as "mainnet" | "testnet"
+  : "mainnet";
+
+// Validate network value
+if (network !== 'mainnet' && network !== 'testnet') {
+  console.error('Error: --network must be either "mainnet" or "testnet"');
+  process.exit(1);
+}
+
+console.log(`🌐 Using network: ${network}`);
+
+// Helper to get network-specific environment variable
+const getEnvVar = (varName: string): string => {
+  const networkPrefix = network.toUpperCase();
+  const value = process.env[`${networkPrefix}_${varName}`];
+  if (!value) {
+    throw new Error(`Environment variable ${networkPrefix}_${varName} is not set`);
+  }
+  return value;
+};
+
+// Retrieve network-specific environment variables
+const knsIdMapTableId = getEnvVar('KNS_ID_MAP_TABLE_ID');
+const knsApiBaseUrl = getEnvVar('KNS_API_BASE_URL');
+const knsApiKey = getEnvVar('KNS_API_KEY');
 
 // Instantiate a GraphQL client pointing to the correct network endpoint
 const gqlClient = new SuiGraphQLClient({
-	url: `https://sui-${process.env.SUI_NETWORK! as "testnet" | "mainnet"}.mystenlabs.com/graphql`,
+	url: `https://graphql.${network}.sui.io/graphql`,
 });
 
 // GraphQL query to fetch chain identifier details from the KNS ID Map Table.
 const chainIdentifierQuery = graphql(`
 query ($id: SuiAddress!) {
-  owner(address: $id) {
+  address(address: $id) {
     dynamicFields {      
       nodes {            
         name { json }
@@ -74,7 +105,7 @@ async function knsIdMapTable(name: string): Promise<string[] | null> {
 		query: chainIdentifierQuery,
 		variables: { id: knsIdMapTableId },
 	});
-	const nodes = result.data?.owner?.dynamicFields?.nodes;
+	const nodes = (result.data?.address as any)?.dynamicFields?.nodes;
 	const match = nodes?.find((node: any) => node.name.json === name);
 
 	if (!match) {
@@ -90,7 +121,7 @@ async function knsIdMapTable(name: string): Promise<string[] | null> {
  * @returns A promise that resolves to the SUI object details.
  */
 async function getSuiObject(objectId: string) {
-	const client = new SuiClient({ url: getFullnodeUrl(process.env.SUI_NETWORK! as "testnet" | "mainnet") });
+	const client = new SuiClient({ url: getFullnodeUrl(network) });
 	const objectOwner = await client.getObject({
 		id: objectId,
 		options: {
@@ -116,21 +147,29 @@ async function getSuiObject(objectId: string) {
  *   ts-node ./sui-lookup.ts "+15551234567"
  */
 async function main() {
-	// Read phone number from command line arguments
-	const phoneNumber = process.argv[2];
+	// Read phone number from command line arguments (filter out --network flag)
+	const phoneNumber = args.find((arg, index) => {
+		// Skip if it's a flag
+		if (arg.startsWith('--')) return false;
+		// Skip if it's the value after --network flag
+		if (networkIndex !== -1 && index === networkIndex + 1) return false;
+		// This is the phone number
+		return true;
+	});
 	if (!phoneNumber) {
 		console.error('Please provide a phone number in E.164 format as a command line argument.');
+		console.error('Usage: ts-node ./lookup-number-key.ts <phoneNumber> [--network <mainnet|testnet>]');
 		process.exit(1);
 	}
 
 	try {
 		// Perform API call to retrieve the objectId for the provided phone number
 		const response = await axios.post(
-			`${process.env.KNS_API_BASE_URL!}/kns/object-id-lookup`,
+			`${knsApiBaseUrl}/kns/object-id-lookup`,
 			{ phoneNumber },
 			{
 				headers: {
-					'x-api-key': `${process.env.KNS_API_KEY!}`,
+					'x-api-key': knsApiKey,
 					'Content-Type': 'application/json',
 				},
 			}
@@ -151,6 +190,10 @@ async function main() {
 		}
 	} catch (error: any) {
 		console.error('Error:', error.message);
+		if (error.response) {
+			console.error('Status:', error.response.status);
+			console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+		}
 	}
 }
 
