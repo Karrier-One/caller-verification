@@ -214,7 +214,7 @@ curl --location 'https://kns-api.karrier.dev/kns/object-id-lookup' \
 # Full JWT verification flow
 ### Originating Server
 ```bash
-ts-node ./authorize.ts "+14317001078" es256-private-key.pem es256-signed.jwt
+ts-node ./authorize.ts "+14317001075" "+14165551234" "call1" es256-private-key.pem es256-signed.jwt
 ```
 ### Terminating Server
 ```bash
